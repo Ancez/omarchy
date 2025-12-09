@@ -6,6 +6,11 @@ if [[ "$1" != "post" ]]; then
   exit 0
 fi
 
+# Wait for systemd-networkd to be ready
+sleep 2
+
+# Find all Realtek RTL8125 interfaces and trigger systemd-networkd to reconfigure them
+# This ensures routes are properly restored after resume without disrupting the link layer
 for iface in /sys/class/net/*; do
   ifname=$(basename "$iface")
   if [[ "$ifname" == "lo" ]]; then
@@ -17,7 +22,18 @@ for iface in /sys/class/net/*; do
     continue
   fi
 
-  ip link set "$ifname" down 2>/dev/null && ip link set "$ifname" up 2>/dev/null
+  # Wait for carrier to be detected
+  for i in {1..10}; do
+    if [[ -f "$iface/carrier" ]] && [[ $(cat "$iface/carrier" 2>/dev/null) == "1" ]]; then
+      break
+    fi
+    sleep 0.5
+  done
+
+  # Trigger systemd-networkd to reconfigure the interface and restore routes
+  if command -v networkctl >/dev/null 2>&1; then
+    networkctl reconfigure "$ifname" 2>/dev/null || true
+  fi
 done
 EOF
   sudo chmod +x /usr/lib/systemd/system-sleep/omarchy-r8125-resume.sh
